@@ -1,0 +1,61 @@
+/* static/css/style.css */
+
+/* ============================================= */
+/* == 1. GLOBAL VARIABLES AND BASE STYLES ====== */
+/* ============================================= */
+:root {
+    --dark-bg: #121212;
+    --dark-card-bg: #1e1e1e;
+    --received-traffic: #ffffff;
+    --send-traffic: #ff0000;
+}
+
+/* ============================================= */
+/* == 2. MAIN LAYOUT =========================== */
+/* ============================================= */
+
+body {
+    background-color: var(--dark-bg);
+}
+
+/* ============================================= */
+/* == 3. COMPONENT STYLES ====================== */
+/* ============================================= */
+.card {
+    background-color: var(--dark-card-bg);
+    border: 1px solid var(--bs-border-color-translucent);
+    border-radius: 0.75rem;
+}
+
+.received-container {
+    border-bottom: var(--received-traffic) solid 2px;
+}
+
+.sent-container {
+    border-bottom: var(--send-traffic) solid 2px;
+}
+
+.status-online {
+    background-color: #198754;
+    color: #fff;
+}
+
+.status-caching {
+    background-color: #0dcaf0;
+    color: #212529;
+}
+
+.status-idle {
+    background-color: #ffc107;
+    color: #212529;
+}
+
+.status-offline {
+    background-color: #6c757d;
+    color: #fff;
+}
+
+.status-disabled {
+    background-color: #212529;
+    color: rgba(255, 255, 255, 0.5);
+}

@@ -1,0 +1,452 @@
+<!-- templates/config_manager.html -->
+
+{% extends 'base.html' %}
+
+{% block title %}Configuration Management{% endblock %}
+
+{% block styles %}
+<style>
+    /* Style for the text editor area */
+    #file-content-editor {
+        font-family: 'Courier New', Courier, monospace;
+        min-height: 60vh;
+        background-color: #212529;
+        color: #f8f9fa;
+        border: 1px solid #495057;
+    }
+    /* Makes file list items look clickable */
+    .list-group-item-action {
+        cursor: pointer;
+    }
+    /* Style for the currently selected file in the list */
+    .list-group-item.active {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">
+    Configuration Management
+</h1>
+
+<!-- Warning box to alert the user of the risks -->
+<div class="alert alert-warning" role="alert">
+    <h4 class="alert-heading"><i class="bi bi-exclamation-triangle-fill"></i> Warning!</h4>
+    <p>Editing these files can compromise the functionality of the VPN or the server. Proceed with caution.</p>
+    <hr>
+    <p class="mb-0">For each save, a backup file with the extension <code>.bak.TIMESTAMP</code> will be automatically created in the same directory.</p>
+</div>
+
+
+<div class="row mt-4">
+    <!-- Left Column: File List -->
+    <div class="col-md-4">
+        <!-- Loop through each category of configuration files (e.g., 'WireGuard', 'OpenVPN') -->
+        {% for category_key, category_data in config_files_grouped.items() %}
+            {% if category_data.files %}
+                <h5 class="mt-3">{{ category_data.title }}</h5>
+                <div class="list-group" id="config-files-list-{{ category_key }}">
+                    <!-- Loop through each file in the category -->
+                    {% for key, data in category_data.files.items() %}
+                        <a class="list-group-item list-group-item-action" 
+                        data-file-key="{{ key }}"
+                        data-file-path="{{ data.path }}"> <!-- Make sure this data attribute is present! -->
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">{{ key.replace('pivpn_', '').replace('wg_client_', '').replace('wg_', '') }}</h6>
+                            </div>
+                            <small class="text-muted">{{ data.description }}</small>
+                        </a>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <!-- Right Column: Editor and controls -->
+    <div class="col-md-8">
+        <div id="editor-container" class="d-none">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                 <h5 id="current-file-title"></h5>
+                 <div>
+                    <button class="btn btn-secondary" id="backup-button" disabled>
+                        <i class="bi bi-clock-history me-1"></i> Manage Backups
+                    </button>
+                    <button class="btn btn-primary" id="save-button" disabled>
+                        <i class="bi bi-save me-1"></i> Save
+                    </button>
+                 </div>
+            </div>
+            <code id="current-file-path" class="d-block mb-2"></code> <!-- Display for the current file's path -->
+            <textarea class="form-control" id="file-content-editor" rows="20"></textarea>
+            <div id="loading-spinner" class="text-center mt-3 d-none">
+                <!-- Spinner shown while file content is loading -->
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+        <div id="placeholder-container" class="text-center text-muted p-5 border rounded">
+            <!-- Placeholder shown when no file is selected -->
+            <i class="bi bi-files fs-1"></i>
+            <p class="mt-2">Select a file from the list to view and edit its content.</p>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: Manage Backups -->
+<div class="modal fade" id="backupModal" tabindex="-1" aria-labelledby="backupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable"> <!-- Added modal-dialog-scrollable to allow content to scroll -->
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="backupModalLabel">Manage Backups for <span id="backup-modal-filename"></span></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="backup-modal-body">
+          <!-- Content loaded dynamically via JavaScript -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- MODAL: Backup Quick View -->
+  <div class="modal fade" id="quickViewModal" aria-hidden="true" aria-labelledby="quickViewModalLabel" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="quickViewModalLabel">Backup Preview</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <pre id="quick-view-content"><code>Loading...</code></pre>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- MODAL: Generic Confirmation -->
+  <div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+          <div class="modal-content">
+              <div class="modal-header">
+                  <h5 class="modal-title" id="confirmModalLabel">Confirm Action</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body" id="confirmModalBody">
+                  Are you sure you want to proceed?
+              </div>
+              <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="confirm-modal-cancel-btn">Cancel</button>
+                  <button type="button" class="btn btn-primary" id="confirm-modal-confirm-btn">Confirm</button>
+              </div>
+          </div>
+      </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- DOM ELEMENTS ---
+    const fileListItems = document.querySelectorAll('.list-group-item-action');
+    const editorContainer = document.getElementById('editor-container');
+    const placeholderContainer = document.getElementById('placeholder-container');
+    const editorTextarea = document.getElementById('file-content-editor');
+    const saveButton = document.getElementById('save-button');
+    const backupButton = document.getElementById('backup-button');
+    const currentFileTitle = document.getElementById('current-file-title');
+    const currentFilePath = document.getElementById('current-file-path');
+    const loadingSpinner = document.getElementById('loading-spinner');
+
+    // --- MODALS ---
+    // Backup Management Modal
+    const backupModalElement = document.getElementById('backupModal');
+    const backupModal = new bootstrap.Modal(backupModalElement);
+    const backupModalBody = document.getElementById('backup-modal-body');
+    const backupModalLabel = document.getElementById('backupModalLabel');
+
+    // Backup Preview Modal
+    const quickViewModalElement = document.getElementById('quickViewModal');
+    const quickViewModal = new bootstrap.Modal(quickViewModalElement);
+    const quickViewContent = document.getElementById('quick-view-content').querySelector('code');
+    const quickViewModalLabel = document.getElementById('quickViewModalLabel');
+
+    // Confirmation Modal
+    const confirmModalElement = document.getElementById('confirmModal');
+    const confirmModal = new bootstrap.Modal(confirmModalElement);
+    const confirmModalBody = document.getElementById('confirmModalBody');
+    const confirmModalTitle = document.getElementById('confirmModalLabel');
+    const confirmModalConfirmBtn = document.getElementById('confirm-modal-confirm-btn');
+
+    // --- APPLICATION STATE ---
+    let currentFileKey = null;
+    let originalContent = '';
+    let hasUnsavedChanges = false;
+
+    // --- HELPER FUNCTIONS ---
+
+    /**
+     * Sets the state for unsaved changes and enables/disables the save button.
+     * @param {boolean} status - True if there are unsaved changes, false otherwise.
+     */
+    function setUnsavedChanges(status) {
+        hasUnsavedChanges = status;
+        saveButton.disabled = !status;
+    }
+
+    /**
+     * Shows a generic confirmation modal and returns a Promise that resolves on confirm and rejects on cancel.
+     * @param {string} bodyText - The message to display in the modal body.
+     * @param {string} [title='Confirm Action'] - The title for the modal.
+     * @returns {Promise<void>}
+     */
+    function showConfirmModal(bodyText, title = 'Confirm Action') {
+        return new Promise((resolve, reject) => {
+            confirmModalTitle.textContent = title;
+            confirmModalBody.textContent = bodyText;
+
+            const handleConfirm = () => { cleanup(); resolve(); };
+            const handleCancel = () => { cleanup(); reject(); };
+            
+            const cleanup = () => {
+                confirmModalConfirmBtn.removeEventListener('click', handleConfirm);
+                confirmModalElement.removeEventListener('hidden.bs.modal', handleCancel);
+                confirmModal.hide();
+            };
+            
+            confirmModalConfirmBtn.addEventListener('click', handleConfirm, { once: true });
+            confirmModalElement.addEventListener('hidden.bs.modal', handleCancel, { once: true });
+
+            confirmModal.show();
+        });
+    }
+
+    /**
+     * Fetches and displays the content of a selected configuration file.
+     * @param {string} fileKey - The key of the file to load.
+     */
+    async function loadFileContent(fileKey) {
+        // Update UI to show loading state
+        placeholderContainer.classList.add('d-none');
+        editorContainer.classList.remove('d-none');
+        loadingSpinner.classList.remove('d-none');
+        editorTextarea.value = 'Loading...';
+        editorTextarea.disabled = true;
+        setUnsavedChanges(false);
+        backupButton.disabled = true;
+
+        const targetElement = document.querySelector(`[data-file-key="${fileKey}"]`);
+        currentFileTitle.textContent = targetElement.querySelector('h6').textContent;
+        currentFilePath.textContent = targetElement.dataset.filePath;
+        
+        try {
+            const response = await fetch(`/config/api/view?file_key=${fileKey}`);
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || `HTTP Error: ${response.status}`);
+            }
+            const data = await response.json();
+            editorTextarea.value = data.content;
+            originalContent = data.content;
+            editorTextarea.disabled = false;
+            backupButton.disabled = false; // Enable backup button once file is loaded
+        } catch (error) {
+            editorTextarea.value = `Error loading file: ${error.message}`;
+            originalContent = editorTextarea.value;
+            showToast(`Error: ${error.message}`, 'danger');
+        } finally {
+            loadingSpinner.classList.add('d-none');
+        }
+    }
+
+    // --- EVENT HANDLERS ---
+
+    // Detects changes in the editor textarea to enable the save button.
+    editorTextarea.addEventListener('input', () => {
+        setUnsavedChanges(editorTextarea.value !== originalContent);
+    });
+
+    // Handles clicks on the file list items.
+    fileListItems.forEach(item => {
+        item.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const target = e.currentTarget;
+
+            // If there are unsaved changes, ask for confirmation before switching files.
+            if (hasUnsavedChanges) {
+                try {
+                    await showConfirmModal('You have unsaved changes. Are you sure you want to switch files and lose them?');
+                } catch {
+                    return; // User cancelled, do nothing.
+                }
+            }
+            
+            // Update active state in the file list
+            fileListItems.forEach(el => el.classList.remove('active'));
+            target.classList.add('active');
+            
+            currentFileKey = target.dataset.fileKey;
+            loadFileContent(currentFileKey);
+        });
+    });
+
+    // Handles the save button click.
+    saveButton.addEventListener('click', async () => {
+        if (!currentFileKey || !hasUnsavedChanges) return;
+        
+        const originalButtonText = saveButton.innerHTML;
+        saveButton.disabled = true;
+        saveButton.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...`;
+        
+        try {
+            const response = await fetch('/config/api/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_key: currentFileKey,
+                    content: editorTextarea.value
+                })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+
+            showToast(data.message, 'success');
+            originalContent = editorTextarea.value;
+            setUnsavedChanges(false);
+
+        } catch (error) {
+            showToast(`Save failed: ${error.message}`, 'danger');
+        } finally {
+            saveButton.disabled = !hasUnsavedChanges; // Re-enable only if there are other unsaved changes made quickly
+            saveButton.innerHTML = originalButtonText;
+        }
+    });
+
+    // --- BACKUP MODAL MANAGEMENT ---
+
+    // Fired when the backup modal is about to be shown. Fetches the backup list.
+    backupModalElement.addEventListener('show.bs.modal', async () => {
+        if (!currentFileKey) return;
+        
+        // Set the modal title correctly
+        const modalTitleSpan = backupModalLabel.querySelector('span');
+        if (modalTitleSpan) {
+            modalTitleSpan.textContent = currentFileTitle.textContent;
+        }
+        
+        backupModalBody.innerHTML = '<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+        
+        try {
+            const response = await fetch(`/config/api/backups?file_key=${currentFileKey}`);
+            const backups = await response.json();
+            
+            if (!response.ok) throw new Error(backups.error || 'Unknown error');
+
+            if (backups.length === 0) {
+                backupModalBody.innerHTML = '<p class="text-center text-muted">No backups found for this file.</p>';
+                return;
+            }
+
+            const listHtml = backups.map(backup => `
+                <div class="list-group-item d-flex justify-content-between align-items-center" data-filename="${backup.filename}">
+                    <div>
+                        <strong>${backup.filename}</strong><br>
+                        <small class="text-muted">${backup.date}</small>
+                    </div>
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-sm btn-outline-secondary quick-view-btn" title="Preview"><i class="bi bi-eye"></i></button>
+                        <button class="btn btn-sm btn-outline-primary restore-btn" title="Restore"><i class="bi bi-arrow-counterclockwise"></i></button>
+                        <button class="btn btn-sm btn-outline-danger delete-btn" title="Delete"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+            `).join('');
+            
+            backupModalBody.innerHTML = `<div class="list-group">${listHtml}</div>`;
+
+        } catch (error) {
+            backupModalBody.innerHTML = `<div class="alert alert-danger">Error loading backups: ${error.message}</div>`;
+        }
+    });
+    
+    // UNIFIED CLICK HANDLER FOR THE BACKUP MODAL BODY
+    // Using event delegation on the modal body to handle clicks for buttons on dynamically added items.
+    backupModalBody.addEventListener('click', async (e) => {
+        const listItem = e.target.closest('.list-group-item');
+        if (!listItem) return;
+        
+        const backupFilename = listItem.dataset.filename;
+        const targetButton = e.target.closest('button');
+        if (!targetButton) return;
+
+        // Handle Quick View button
+        if (targetButton.classList.contains('quick-view-btn')) {
+            quickViewModalLabel.textContent = `Preview of ${backupFilename}`;
+            quickViewContent.textContent = 'Loading...';
+            quickViewModal.show();
+            
+            try {
+                const response = await fetch(`/config/api/view_backup?file_key=${currentFileKey}&backup_filename=${backupFilename}`);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+                quickViewContent.textContent = data.content;
+            } catch (error) {
+                quickViewContent.textContent = `Error loading preview:\n${error.message}`;
+            }
+        }
+        
+        // Handle Restore button
+        if (targetButton.classList.contains('restore-btn')) {
+            try {
+                await showConfirmModal(`Are you sure you want to restore the backup '${backupFilename}'? Current changes in the editor will be lost.`);
+                const response = await fetch('/config/api/restore', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_key: currentFileKey, backup_filename: backupFilename })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+                
+                showToast(data.message, 'success');
+                backupModal.hide();
+                await loadFileContent(currentFileKey); // Reload the editor with the restored content
+            } catch { /* User cancelled */ }
+        }
+
+        // Handle Delete button
+        if (targetButton.classList.contains('delete-btn')) {
+            try {
+                await showConfirmModal(`Are you sure you want to permanently delete the backup '${backupFilename}'?`);
+                const response = await fetch('/config/api/delete_backup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_key: currentFileKey, backup_filename: backupFilename })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+
+                showToast(data.message, 'success');
+                listItem.remove(); // Remove the item from the list visually
+                if (backupModalBody.querySelectorAll('.list-group-item').length === 0) {
+                   backupModalBody.innerHTML = '<p class="text-center text-muted">No backups left.</p>';
+                }
+            } catch { /* User cancelled */ }
+        }
+    });
+    
+    // Attaches the click event to the "Manage Backups" button to show the modal.
+    backupButton.addEventListener('click', () => {
+        if (!backupButton.disabled) {
+            backupModal.show();
+        }
+    });
+
+});
+</script>
+{% endblock %}

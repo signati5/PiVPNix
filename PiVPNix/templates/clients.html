@@ -1,0 +1,829 @@
+<!-- templates/clients.html -->
+
+{% extends 'base.html' %}
+
+{% block title %}clients - PiVPNix{% endblock %}
+
+{% block styles %}
+    {{ super() }} <!-- Inherits base styles if any -->
+    <style>
+        /* Client (Host) Card */
+        .host-card {
+            border-radius: 0.75rem;
+            overflow: hidden;
+        }
+
+        /* Grid for displaying client information */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            font-size: 0.9rem;
+        }
+        .info-item {
+            display: flex;
+            align-items: center;
+        }
+        .info-item .value {
+            margin-left: 10px;
+        }
+
+        /* Responsive adjustment for the info grid on small screens */
+        @media (max-width: 576px) {
+            .info-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Copy Button */
+        .copy-btn {
+            margin-left: 20px;
+            cursor: pointer;
+            color: var(--bs-secondary-color);
+            transition: color 0.2s;
+        }
+        .copy-btn:hover {
+            color: var(--bs-primary);
+        }
+
+        /* Sparkline-style Traffic Bar Chart */
+        .graph-wrapper {
+            position: relative;
+        }
+
+        /* Status Filters */
+        #status-filter-options {
+            padding: 0.5rem;
+        }
+        #status-filter-options li {
+            display: grid;
+            margin: 5px;
+        }
+        .filter-pill {
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            opacity: 0.5;
+            border: 1px solid transparent;
+        }
+        .filter-pill.active {
+            opacity: 1;
+            transform: scale(1.02);
+            box-shadow: 0 0 8px rgba(var(--bs-primary-rgb), 0.5);
+        }
+        .filter-pill input[type="checkbox"] {
+            display: none;
+        }
+    </style>
+{% endblock %}
+
+
+{% block content %}
+    <!-- HEADER -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+        <h1 class="h2 mb-0">Clients</h1>
+        <div class="d-flex align-items-center gap-3 text-nowrap">
+            <small class="text-secondary" id="last-update-time">Initializing...</small>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addClientModal">
+                <i class="bi bi-plus-circle me-1"></i> Add Client
+            </button>
+        </div>
+    </div>
+
+    <!-- SEARCH BAR AND FILTERS -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body d-flex flex-wrap gap-3 align-items-center">
+            <div class="flex-grow-1">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" id="search-input" class="form-control" placeholder="Search by name or IP...">
+                </div>
+            </div>
+            <div class="dropdown" style="min-width: 200px;">
+                <button class="btn btn-outline-secondary dropdown-toggle w-100" type="button" id="status-filter-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                    Filter by status
+                </button>
+                <ul class="dropdown-menu w-100" id="status-filter-options" aria-labelledby="status-filter-btn">
+                    <!-- Pills will be inserted here by JS -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main container for client cards -->
+    <div id="clients-container">
+        <div class="text-center p-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+    <!-- Add Client Modal -->
+    <div class="modal fade" id="addClientModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <form id="addClientForm">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Add New Client</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label for="clientNameInput" class="form-label">Client Name</label>
+                            <input type="text" class="form-control" id="clientNameInput" required pattern="^[a-zA-Z0-9_\-]+$" placeholder="E.g: my_phone">
+                            <div class="invalid-feedback">
+                                Use only letters, numbers, hyphens (-), and underscores (_).
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="clientIpInput" class="form-label">IP Address</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="clientIpInput" required>
+                                <div class="invalid-feedback">
+                                    Enter a valid IP address in the {{ pivpn_subnet }} network.
+                                </div>
+                            </div>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" role="switch" id="autoIpSwitch" checked>
+                                <label class="form-check-label" for="autoIpSwitch">Assign IP Automatically</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary" id="addClientSubmitBtn">
+                            Add
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Deletion</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    Are you sure you want to delete the item: <strong id="itemNameToDelete"></strong>?
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div class="modal fade" id="qrCodeModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="qrModalLabel">QR Code</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center p-4 d-flex justify-content-center align-items-center" style="width: 100%;">
+                    <div id="qrCodeSpinner" class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <img id="qrCodeImage" src="" alt="QR Code" style="display: block;width: 100%;">
+                    <i id="qrCodePlaceholder" class="bi bi-exclamation-circle-fill text-danger" style="font-size: 5rem; display: none;"></i>
+                </div>
+                <div class="modal-footer">
+                    <a href="#" id="downloadQrBtn" class="btn btn-primary disabled" download>
+                        <i class="bi bi-download me-2"></i>Download Image
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // --- INITIAL DATA AND CONFIGURATION ---
+            let jsonData = { "last_update": 0, "max_scale": 0, "hosts": [] }
+            const UPDATE_INTERVAL_SECONDS = {{ update_interval }};
+            const CLIENTS_DATA = {{ clients_data | tojson}};
+            const PIVPN_SUBNET = '{{ pivpn_subnet }}';
+            // Object to store Chart.js instances, keyed by canvas ID, to allow for proper destruction and recreation.
+            let clientCharts = {};
+    
+            /**
+             * Fetches fresh data from the server and triggers a clients update.
+             */
+            async function fetchDataAndUpdate() {
+                try {
+                    const response = await fetch("{{ url_for('clients.data') }}");
+                    if (!response.ok) {
+                        if (response.status === 401) { // Handle unauthorized access by redirecting to login
+                            window.location.href = '/login';
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    jsonData = data;
+    
+                    updateDashboard();
+                } catch (error) {
+                    console.error("Failed to fetch clients data:", error);
+                    showToast(`Could not load data: ${error.message}`, 'danger');
+                }
+            }
+    
+            // --- HELPER FUNCTIONS ---
+            /**
+             * Creates an HTML string for a single info item in the client card grid.
+             * @param {string} label - The label for the data point.
+             * @param {string} value - The value to display.
+             * @param {string} copyValue - The value to copy to the clipboard (can be different from display value).
+             * @param {string} className - Optional CSS class for the label.
+             * @returns {string} The generated HTML.
+             */
+            const createGridItemHTML = (label, value, copyValue, className = "") => {
+                const displayValue = value || 'N/A';
+                const value_to_copy = copyValue || value;
+                const copyButton = value_to_copy ? `<i class="bi bi-clipboard copy-btn" data-copy-value="${value_to_copy}" title="Copy"></i>` : '';
+                return `
+                    <div class="info-item">
+                        <span><strong class="${className}">${label}:</strong> <span class="value">${displayValue}</span></span>
+                        ${copyButton}
+                    </div>`;
+            };
+            
+            // --- EVENT HANDLERS ---
+            /**
+             * Handles the enable/disable toggle switch for a client.
+             */
+            const handleToggleClientStatus = (event) => {
+                if (!event.target.classList.contains('client-toggle-switch')) {
+                    return;
+                }
+                const form = event.target.closest('form');
+                if (!form) return;
+
+                fetch(form.action, {
+                    method: 'POST',
+                    body: new FormData(form),
+                })
+                .then(response => {
+                    if (!response.ok) throw new Error(`Network error: ${response.statusText}`);
+                    return response.json();
+                })
+                .then(data => {
+                    showToast(data.message || 'Client status updated!', 'success');
+                    fetchDataAndUpdate(); // Refresh data to reflect changes
+                })
+                .catch(error => {
+                    console.error('Error while updating client status:', error);
+                    event.target.checked = !event.target.checked; // Revert the toggle visually on failure
+                    showToast(`Could not update status: ${error.message}`, 'danger');
+                });
+            };
+
+            /**
+             * Handles the download of a client's configuration file.
+             */
+            const handleDownloadConfig = (event) => {
+                const form = event.target.closest('.download-config-form');
+                if (!form) return;
+            
+                event.preventDefault();
+            
+                const clientName = form.querySelector('input[name="client"]').value;
+                const url = `${form.action}?client=${encodeURIComponent(clientName)}`;
+            
+                fetch(url)
+                    .then(response => {
+                        if (!response.ok) {
+                            // Try to parse error message from server's JSON response
+                            return response.json().then(errorData => {
+                                throw new Error(errorData.message || 'Unknown server error.');
+                            });
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        // Create a temporary link to trigger the file download
+                        const downloadUrl = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = downloadUrl;
+                        a.download = `${clientName}.conf`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(downloadUrl);
+                        a.remove();
+                    })
+                    .catch(error => {
+                        console.error('Error during config download:', error);
+                        showToast(`Download failed: ${error.message}`, 'danger');
+                    });
+            };
+
+            /**
+             * Creates or updates a traffic chart for a specific client.
+             */
+            const createClientTrafficChart = (canvasId, label, data, color, timestamps, maxScale, reverse) => {
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+            
+                // If a chart instance already exists for this canvas, destroy it first to prevent memory leaks.
+                if (clientCharts[canvasId]) {
+                    clientCharts[canvasId].destroy();
+                }
+                
+                clientCharts[canvasId] = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: timestamps.map(ts => formatTimeFromUnix(ts)),
+                        datasets: [{
+                            label: label,
+                            data: data,
+                            backgroundColor: `${color}80`, // Color with 80% opacity
+                            borderColor: color,
+                            borderWidth: 1,
+                            borderRadius: 2,
+                            barPercentage: 1.0,
+                            categoryPercentage: 1.0,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            // Customize tooltips for better readability.
+                            tooltip: {
+                                enabled: true,
+                                displayColors: false,
+                                callbacks: {
+                                    title: function(context) {
+                                        const dataIndex = context[0].dataIndex;
+                                        return timestamps && timestamps[dataIndex] ? formatUnixTimestamp(timestamps[dataIndex]) : '';
+                                    },
+                                    label: function(context) {
+                                        return `${context.dataset.label}: ${formatBytes(context.raw)}`;
+                                    }
+                                }
+                            }
+                        },
+                        // Configure the chart axes. We hide them for a clean "sparkline" look.
+                        scales: {
+                            x: {
+                                display: false,
+                                labels: timestamps
+                            },
+                            y: {
+                                reverse: reverse,
+                                display: false,
+                                beginAtZero: true,
+                                // Use a shared max scale for all charts for consistent visual comparison.
+                                max: maxScale > 0 ? maxScale : undefined,
+                                ticks: {
+                                    callback: (value) => formatBytes(value, 0)
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+            
+            // --- CORE DASHBOARD FUNCTIONS ---
+            /**
+             * Rerenders the entire dashboard based on the current `jsonData` and filter settings.
+             */
+            const updateDashboard = () => {
+                document.getElementById('last-update-time').textContent = `Updated: ${formatUnixTimestamp(jsonData.last_update)}`;
+        
+                const container = document.getElementById('clients-container');
+                const searchInput = document.getElementById('search-input').value.toLowerCase();
+                const selectedStatuses = Array.from(document.querySelectorAll('#status-filter-options input:checked')).map(cb => cb.value);
+        
+                // Filter hosts based on the search input and selected status filters.
+                const filteredHosts = jsonData.hosts.filter(host => {
+                    const statusMatch = selectedStatuses.length === 0 || selectedStatuses.includes(host.status);
+                    const searchMatch = !searchInput || host.name.toLowerCase().includes(searchInput) || host.virtual_ip?.includes(searchInput) || host.remote_ip?.includes(searchInput);
+                    return statusMatch && searchMatch;
+                });
+                
+                if (filteredHosts.length === 0) {
+                    container.innerHTML = `<div class="text-center p-5 text-muted"><h4>No results found</h4><p>Try adjusting your search filters.</p></div>`;
+                    return;
+                }
+        
+                // 1. Update the container's HTML with the filtered client cards.
+                container.innerHTML = filteredHosts.map(host => {
+                    const isEnabled = host.status !== 'disabled';
+                    const currentStatus = statusConfig[host.status] || statusConfig.offline;
+                    const publicKey = CLIENTS_DATA[host.name]?.public_key || 'N/A';
+                    const publicKey_displayValue = (publicKey && publicKey.length > 10) ? `${publicKey.substring(0, 5)} ***** ${publicKey.substring(publicKey.length - 5)}` : publicKey;
+        
+                    return `
+                        <div class="card host-card shadow-sm mb-4">
+                            ${isEnabled ? `
+                                <div class="graph-wrapper">
+                                     <div style="height: 45px; position: relative;">
+                                        <canvas id="chart-received-${host.name}"></canvas>
+                                    </div>
+                                </div>
+                            ` : ''}
+                            <div class="card-body p-4">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+                                    <div>
+                                        <h3 class="mb-0 d-inline-block">${host.name}</h3>
+                                        <span class="badge ${currentStatus.class} ms-2 align-middle">${currentStatus.text}</span>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2 action-button">
+                                        <form action="{{ url_for('clients.on_off') }}" method="POST"><input type="hidden" name="client" value="${host.name}"><div class="form-check form-switch"><input class="form-check-input client-toggle-switch" type="checkbox" role="switch" name="status" value="on" style="font-size: 1.5rem;" ${isEnabled ? 'checked' : ''}></div></form>
+                                        <form action="{{ url_for('clients.client_conf') }}" method="GET" class="download-config-form"><input type="hidden" name="client" value="${host.name}"><button type="submit" class="btn btn-sm btn-outline-primary" title="Download configuration"><i class="bi bi-download"></i></button></form>
+                                        <button class="btn btn-sm btn-outline-secondary" title="Show QR Code" data-bs-toggle="modal" data-bs-target="#qrCodeModal" data-item-name="${host.name}"><i class="bi bi-qr-code"></i></button>
+                                        <button class="btn btn-sm btn-outline-danger" title="Delete" data-bs-toggle="modal" data-bs-target="#deleteConfirmModal" data-item-name="${host.name}"><i class="bi bi-trash"></i></button>
+                                    </div>
+                                </div>
+                                <div class="info-grid">
+                                    ${createGridItemHTML("Public key", publicKey_displayValue, publicKey)}
+                                    ${createGridItemHTML("Creation date", CLIENTS_DATA[host.name]?.creation_date)}
+                                    ${!isEnabled ? '' : `
+                                        ${createGridItemHTML("Last Seen", host.last_seen)}
+                                        ${createGridItemHTML("Remote Port", host.remote_port)}
+                                        ${createGridItemHTML("Remote IP", host.remote_ip)}
+                                        ${createGridItemHTML("Virtual IP", host.virtual_ip)}
+                                        ${createGridItemHTML("Received", formatBytes(host.total_bytes_received), null, "received-container")}
+                                        ${createGridItemHTML("Sent", formatBytes(host.total_bytes_sent), null, "sent-container")}
+                                    `}
+                                </div>
+                            </div>
+                            ${isEnabled ? `
+                                <div class="graph-wrapper">
+                                     <div style="height: 45px; position: relative;">
+                                        <canvas id="chart-sent-${host.name}"></canvas>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>`;
+                }).join('');
+        
+                // 2. After the HTML is inserted into the DOM, initialize the charts.
+                const computedStyle = getComputedStyle(document.documentElement);
+                const receivedColor = computedStyle.getPropertyValue('--received-traffic').trim();
+                const sentColor = computedStyle.getPropertyValue('--send-traffic').trim();
+
+                filteredHosts.forEach(host => {
+                    if (host.status !== 'disabled') {
+                        createClientTrafficChart(
+                            `chart-received-${host.name}`, 
+                            'Received', 
+                            host.bytes_received, 
+                            receivedColor, 
+                            jsonData.update_timestamps,
+                            jsonData.max_scale,
+                            true
+                        );
+                        createClientTrafficChart(
+                            `chart-sent-${host.name}`, 
+                            'Sent', 
+                            host.bytes_sent, 
+                            sentColor, 
+                            jsonData.update_timestamps,
+                            jsonData.max_scale,
+                            false
+                        );
+                    }
+                });
+            };
+    
+            /**
+             * Populates the status filter dropdown with options based on the `statusConfig` object.
+             */
+            const populateStatusFilter = () => {
+                const optionsContainer = document.getElementById('status-filter-options');
+                optionsContainer.innerHTML = Object.entries(statusConfig).map(([status, config]) =>
+                    `<li>
+                        <label class="filter-pill badge ${config.class}">
+                            <input type="checkbox" class="form-check-input" value="${status}">
+                            ${config.text}
+                        </label>
+                    </li>`
+                ).join('');
+                optionsContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                    cb.addEventListener('change', () => {
+                        cb.parentElement.classList.toggle('active', cb.checked);
+                        const selectedCount = document.querySelectorAll('#status-filter-options input:checked').length;
+                        document.getElementById('status-filter-btn').textContent = selectedCount > 0 ? `Status (${selectedCount})` : 'Filter by status';
+                        updateDashboard();
+                    });
+                });
+            };
+            
+            // --- CLIPBOARD FUNCTION ---
+            /**
+             * Copies a given text to the clipboard, providing visual feedback.
+             * Uses modern Clipboard API with a fallback to `execCommand`.
+             * @param {string} text - The text to copy.
+             * @param {HTMLElement} targetElement - The icon element to provide visual feedback.
+             */
+            function copyToClipboard(text, targetElement) {
+                // Function to update the icon to show success
+                function showSuccess() {
+                    if (targetElement) {
+                        targetElement.className = 'bi bi-check-lg copy-btn';
+                        targetElement.style.color = 'var(--bs-success)';
+                        setTimeout(() => {
+                            targetElement.className = 'bi bi-clipboard copy-btn';
+                            targetElement.style.color = ''; // Revert to default color
+                        }, 1500);
+                    }
+                }
+            
+                // Fallback using the deprecated execCommand for older browsers
+                function fallbackCopy(text) {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.style.position = 'fixed'; // Prevents scrolling to bottom of page in MS Edge.
+                    textarea.style.top = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    try {
+                        document.execCommand('copy');
+                        showSuccess();
+                    } catch (err) {
+                        console.error('Fallback copy failed:', err);
+                        showToast('Could not copy text.', 'danger');
+                    } finally {
+                        document.body.removeChild(textarea);
+                    }
+                }
+            
+                // Use the modern Clipboard API if available
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(showSuccess).catch(err => {
+                        console.error('Clipboard API copy failed:', err);
+                        fallbackCopy(text); // Try fallback if API fails (e.g., due to permissions)
+                    });
+                } else {
+                    fallbackCopy(text); // Use fallback immediately if API is not supported
+                }
+            }            
+    
+            // --- INITIAL SETUP AND EVENT LISTENERS ---
+            populateStatusFilter();
+            
+            document.getElementById('search-input').addEventListener('input', updateDashboard);
+    
+            // Use event delegation on the main container for performance
+            const clientsContainer = document.getElementById('clients-container');
+            clientsContainer.addEventListener('change', handleToggleClientStatus);
+            clientsContainer.addEventListener('submit', handleDownloadConfig);
+            clientsContainer.addEventListener('click', e => {
+                const copyButton = e.target.closest('.copy-btn');
+                if (copyButton) {
+                    copyToClipboard(copyButton.dataset.copyValue, copyButton);
+                }
+            });
+    
+            // --- MODAL MANAGEMENT ---
+            
+            // Add Client Modal Logic
+            const addClientModalElement = document.getElementById("addClientModal");
+            if (addClientModalElement) {
+                const addClientModal = new bootstrap.Modal(addClientModalElement);
+                const addClientForm = document.getElementById('addClientForm');
+                const submitBtn = document.getElementById('addClientSubmitBtn');
+                const clientNameInput = document.getElementById('clientNameInput');
+                const clientIpInput = document.getElementById('clientIpInput');
+                const autoIpSwitch = document.getElementById('autoIpSwitch');
+            
+                // Scans used IPs and suggests the next free one in the subnet.
+                const findNextAvailableIp = () => {
+                    const usedIps = new Set(jsonData.hosts.map(host => host.virtual_ip).filter(ip => ip));
+                    if (!PIVPN_SUBNET || !PIVPN_SUBNET.includes('/')) return "0.0.0.0";
+                    const [networkAddr] = PIVPN_SUBNET.split('/');
+                    const ipParts = networkAddr.split('.').map(Number);
+                    if (ipParts.length !== 4 || ipParts.some(isNaN)) return "0.0.0.0";
+                    const prefix = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.`;
+                    for (let i = 2; i < 255; i++) {
+                        const potentialIp = prefix + i;
+                        if (!usedIps.has(potentialIp)) return potentialIp;
+                    }
+                    return ''; // No IP available
+                };
+            
+                // Validates the manually entered IP address.
+                const validateIpInput = () => {
+                    const ipStr = clientIpInput.value.trim();
+                    clientIpInput.classList.remove('is-invalid');
+                    const feedbackDiv = clientIpInput.parentElement.querySelector('.invalid-feedback');
+                    
+                    if (ipStr === '') {
+                        if (feedbackDiv) feedbackDiv.textContent = 'IP address cannot be empty.';
+                        clientIpInput.classList.add('is-invalid');
+                        return false;
+                    }
+                
+                    const existingClient = jsonData.hosts.find(host => host.virtual_ip === ipStr);
+                    if (existingClient) {
+                        if (feedbackDiv) feedbackDiv.textContent = `IP already in use by client '${existingClient.name}'.`;
+                        clientIpInput.classList.add('is-invalid');
+                        return false;
+                    }
+
+                    const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+                    if (!ipRegex.test(ipStr)) {
+                        if (feedbackDiv) feedbackDiv.textContent = `Invalid IP format.`;
+                        clientIpInput.classList.add('is-invalid');
+                        return false;
+                    }
+
+                    if (feedbackDiv) feedbackDiv.textContent = `Enter a valid IP address in the ${PIVPN_SUBNET} network.`;
+                    return true;
+                };
+
+                // Enables/disables the IP input field based on the 'auto' switch.
+                const toggleIpInput = () => {
+                    if (autoIpSwitch.checked) {
+                        clientIpInput.value = 'Auto';
+                        clientIpInput.disabled = true;
+                        clientIpInput.required = false;
+                        clientIpInput.classList.remove('is-invalid');
+                        addClientForm.classList.remove('was-validated');
+                    } else {
+                        clientIpInput.disabled = false;
+                        clientIpInput.required = true;
+                        clientIpInput.value = findNextAvailableIp();
+                        clientIpInput.focus();
+                        validateIpInput();
+                    }
+                };
+                
+                clientIpInput.addEventListener('input', validateIpInput);
+                autoIpSwitch.addEventListener('change', toggleIpInput);
+            
+                // Reset form on modal show
+                addClientModalElement.addEventListener('show.bs.modal', () => {
+                    addClientForm.classList.remove('was-validated');
+                    addClientForm.reset();
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = 'Add';
+                    autoIpSwitch.checked = true;
+                    toggleIpInput();
+                    const feedbackDiv = clientIpInput.parentElement.querySelector('.invalid-feedback');
+                    if (feedbackDiv) feedbackDiv.textContent = `Enter a valid IP address in the ${PIVPN_SUBNET} network.`;
+                });
+            
+                // Handle form submission
+                addClientForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+            
+                    if (!autoIpSwitch.checked && !validateIpInput()) return;
+                    if (!addClientForm.checkValidity()) {
+                        e.stopPropagation();
+                        addClientForm.classList.add('was-validated');
+                        return;
+                    }
+
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> Adding...`;
+                    
+                    const clientName = clientNameInput.value;
+                    const clientIp = autoIpSwitch.checked ? 'auto' : clientIpInput.value;
+
+                    try {
+                        const response = await fetch("{{ url_for('clients.client_add') }}", {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: clientName, ip: clientIp }),
+                        });
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.message || result.error);
+                        
+                        addClientModal.hide();
+                        showToast(result.message, 'success');
+                        fetchDataAndUpdate(); // Refresh dashboard to show new client
+                    } catch (error) {
+                        showToast(error.message, 'danger');
+                    } finally {
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = 'Add';
+                    }
+                });
+            }
+
+            // Delete Confirmation Modal Logic
+            const deleteModalElement = document.getElementById("deleteConfirmModal");
+            if (deleteModalElement) {
+                const deleteModal = new bootstrap.Modal(deleteModalElement);
+                const confirmDeleteBtn = deleteModalElement.querySelector("#confirmDeleteBtn");
+                const itemNameElement = deleteModalElement.querySelector("#itemNameToDelete");
+                let clientNameToDelete = null;
+            
+                deleteModalElement.addEventListener("show.bs.modal", e => {
+                    clientNameToDelete = e.relatedTarget.getAttribute("data-item-name");
+                    itemNameElement.textContent = clientNameToDelete;
+                    confirmDeleteBtn.disabled = false;
+                    confirmDeleteBtn.innerHTML = 'Delete';
+                });
+            
+                confirmDeleteBtn.addEventListener("click", async () => {
+                    if (!clientNameToDelete) return;
+            
+                    confirmDeleteBtn.disabled = true;
+                    confirmDeleteBtn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> Deleting...`;
+            
+                    try {
+                        const response = await fetch("{{ url_for('clients.client_delete') }}", {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ client: clientNameToDelete }),
+                        });
+                        const result = await response.json();
+                        if (!response.ok) {
+                            throw new Error(result.message || result.error || 'Unknown error.');
+                        }
+                        
+                        deleteModal.hide();
+                        showToast(result.message, 'success');
+                        fetchDataAndUpdate(); // Refresh dashboard to remove the client
+            
+                    } catch (error) {
+                        deleteModal.hide();
+                        showToast(`Could not delete '${clientNameToDelete}': ${error.message}`, 'danger');
+                    } finally {
+                        confirmDeleteBtn.disabled = false;
+                        confirmDeleteBtn.innerHTML = 'Delete';
+                        clientNameToDelete = null;
+                    }
+                });
+            }
+    
+            // QR Code Modal Logic
+            const qrModal = document.getElementById("qrCodeModal");
+            if (qrModal) {
+                const qrCodeImage = qrModal.querySelector("#qrCodeImage");
+                const qrCodeSpinner = qrModal.querySelector("#qrCodeSpinner");
+                const qrCodePlaceholder = qrModal.querySelector("#qrCodePlaceholder");
+                const downloadBtn = qrModal.querySelector("#downloadQrBtn");
+
+                qrModal.addEventListener("show.bs.modal", e => {
+                    const name = e.relatedTarget.getAttribute("data-item-name");
+                    qrModal.querySelector("#qrModalLabel").textContent = `QR Code for ${name}`;
+                    
+                    // Reset state
+                    qrCodeSpinner.style.display = 'block';
+                    qrCodeImage.style.display = 'none';
+                    qrCodePlaceholder.style.display = 'none';
+                    downloadBtn.classList.add('disabled');
+                    downloadBtn.href = '#';
+                    qrCodeImage.src = ''; 
+                    
+                    const qrUrl = `{{ url_for('clients.qrcode') }}?client=${encodeURIComponent(name)}`;
+
+                    // Set up handlers for successful or failed image load
+                    qrCodeImage.onload = () => {
+                        qrCodeSpinner.style.display = 'none';
+                        qrCodeImage.style.display = 'block';
+                        downloadBtn.href = qrCodeImage.src;
+                        downloadBtn.setAttribute('download', `${name}_qrcode.png`);
+                        downloadBtn.classList.remove('disabled');
+                    };
+                    qrCodeImage.onerror = () => {
+                        console.error(`Failed to load QR code from: ${qrUrl}`);
+                        qrCodeSpinner.style.display = 'none';
+                        qrCodePlaceholder.style.display = 'block';
+                        showToast('Could not load QR code image.', 'danger');
+                    };
+                    
+                    // Start loading the image
+                    qrCodeImage.src = qrUrl;
+                });
+                
+                // Clean up when modal is hidden to free resources
+                qrModal.addEventListener("hidden.bs.modal", () => {
+                    qrCodeImage.src = '';
+                    downloadBtn.href = '#';
+                    downloadBtn.classList.add('disabled');
+                });
+            }
+            
+            // --- INITIAL LOAD AND PERIODIC UPDATES ---
+            fetchDataAndUpdate();
+            setInterval(fetchDataAndUpdate, UPDATE_INTERVAL_SECONDS * 1000);
+        });
+    </script>
+{% endblock %}

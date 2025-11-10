@@ -1,0 +1,198 @@
+<!-- templates/service_manager.html -->
+ 
+{% extends 'base.html' %}
+
+{% block title %}VPN Service Status{% endblock %}
+
+{% block styles %}
+<style>
+    .status-badge {
+        font-size: 1rem;
+        vertical-align: middle;
+    }
+    .info-grid {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.5rem 1rem;
+        align-items: center;
+    }
+    .info-grid strong {
+        text-align: right;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">
+    VPN Service Status
+</h1>
+
+{% if not interfaces %}
+    <div class="alert alert-warning">No WireGuard server configuration interfaces found in <code>{{ current_app.config.WG_SERVER_CONFIG_PATH }}</code>.</div>
+{% else %}
+    <div class="row row-cols-1 g-4" id="services-container">
+        {% for interface in interfaces %}
+        <div class="col">
+            <div class="card service-card" data-interface="{{ interface }}">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Interface: <code>{{ interface }}</code></h5>
+                    <div class="spinner-border spinner-border-sm text-primary status-spinner" role="status"></div>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex align-items-center mb-3">
+                        <h6 class="mb-0 me-3"><i class="bi bi-motherboard me-2"></i>Service Status:</h6>
+                        <div id="service-status-{{ interface }}">Initializing...</div>
+                    </div>
+
+                    <h6 class="mt-4"><i class="bi bi-shield-lock me-2"></i>Interface Details</h6>
+                    <div class="info-grid ps-3">
+                        <strong>Public Key:</strong> <code id="wg-key-{{ interface }}">N/A</code>
+                        <strong>Port:</strong> <code id="wg-port-{{ interface }}">N/A</code>
+                    </div>
+                </div>
+                <div class="card-footer text-end">
+                    <button class="btn btn-success action-btn start-btn" data-action="start" disabled>
+                        <i class="bi bi-play-fill"></i> Start
+                    </button>
+                    <button class="btn btn-danger action-btn stop-btn" data-action="stop" disabled>
+                        <i class="bi bi-stop-fill"></i> Stop
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Get all service card elements from the DOM.
+    const serviceCards = document.querySelectorAll('.service-card');
+
+    /**
+     * Fetches and updates the status for a single service interface card.
+     * @param {string} interfaceName - The name of the interface to update (e.g., 'wg0').
+     */
+    const updateServiceStatus = async (interfaceName) => {
+        // Find all the relevant elements within the card for this interface.
+        const card = document.querySelector(`.service-card[data-interface="${interfaceName}"]`);
+        const spinner = card.querySelector('.status-spinner');
+        const startBtn = card.querySelector('.start-btn');
+        const stopBtn = card.querySelector('.stop-btn');
+        const serviceStatusEl = card.querySelector(`#service-status-${interfaceName}`);
+        const wgKeyEl = card.querySelector(`#wg-key-${interfaceName}`);
+        const wgPortEl = card.querySelector(`#wg-port-${interfaceName}`);
+        
+        // Show spinner and disable buttons to indicate a loading state.
+        spinner.classList.remove('d-none');
+        startBtn.disabled = true;
+        stopBtn.disabled = true;
+
+        try {
+            // Fetch the status from the API.
+            const response = await fetch(`/services/api/status?interface=${interfaceName}`);
+            const data = await response.json();
+            
+            if (!response.ok) throw new Error(data.error || 'Network error');
+
+            // Update service status badge and button states.
+            let statusBadge = '';
+            switch(data.service.active) {
+                case 'active':
+                    statusBadge = '<span class="badge bg-success status-badge">Active</span>';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    break;
+                case 'inactive':
+                    statusBadge = '<span class="badge bg-secondary status-badge">Inactive</span>';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    break;
+                case 'failed':
+                    statusBadge = '<span class="badge bg-danger status-badge">Failed</span>';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = false;
+                    break;
+                case 'error': // New case for critical errors
+                    statusBadge = '<span class="badge bg-danger status-badge">Error</span>';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = true;
+                    break;
+                default:
+                    statusBadge = '<span class="badge bg-warning text-dark status-badge">Unknown</span>';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = false;
+            }
+            // Display the badge and a brief version of the status_text (first line only).
+            const briefStatus = data.service.status_text.split(';')[0];
+            serviceStatusEl.innerHTML = `${statusBadge} <small class="text-muted ms-2">${briefStatus}</small>`;
+            
+            // Update WireGuard details.
+            wgKeyEl.textContent = data.wireguard.public_key || 'N/A';
+            wgPortEl.textContent = data.wireguard.port || 'N/A';
+
+        } catch (error) {
+            // In case of an error, display an error message in the card.
+            serviceStatusEl.innerHTML = `<span class="badge bg-danger status-badge">Error</span> <small>${error.message}</small>`;
+            showToast(`Failed to load status for ${interfaceName}: ${error.message}`, 'danger');
+        } finally {
+            // Always hide the spinner when the operation is complete (success or failure).
+            spinner.classList.add('d-none');
+        }
+    };
+
+    /**
+     * Handles clicks on the Start/Stop buttons using event delegation.
+     * @param {Event} e - The click event.
+     */
+    const handleActionClick = async (e) => {
+        const button = e.target.closest('.action-btn');
+        // If the click was not on an action button, do nothing.
+        if (!button) return;
+
+        // Get the interface name and action from the button's context.
+        const card = button.closest('.service-card');
+        const interfaceName = card.dataset.interface;
+        const action = button.dataset.action;
+
+        // Provide visual feedback that the action is in progress.
+        button.disabled = true;
+        button.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Executing...`;
+
+        try {
+            // Send the action request to the API.
+            const response = await fetch('/services/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ interface: interfaceName, action: action })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+            
+            showToast(data.message, 'success');
+        } catch (error) {
+            showToast(`Action failed: ${error.message}`, 'danger');
+        } finally {
+            // Refresh the status after the action, regardless of the outcome.
+            await updateServiceStatus(interfaceName);
+            
+            // Restore the button's original text and icon.
+            const icon = action === 'start' ? 'bi-play-fill' : 'bi-stop-fill';
+            button.innerHTML = `<i class="bi ${icon}"></i> ${action.charAt(0).toUpperCase() + action.slice(1)}`;
+        }
+    };
+
+    // Add a single event listener to the container. This is more efficient than adding
+    // a listener to each button, especially with dynamically added content.
+    document.getElementById('services-container').addEventListener('click', handleActionClick);
+    
+    // Load the initial status for all interfaces when the page loads.
+    serviceCards.forEach(card => {
+        const interfaceName = card.dataset.interface;
+        updateServiceStatus(interfaceName);
+    });
+});
+</script>
+{% endblock %}
