@@ -1,0 +1,20 @@
+# File di configurazione
+PiVPNix/config.ini
+PiVPNix/data/log_traffic.json
+
+# Virtual environment
+venv/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Log files
+*.log
+
+# IDE
+.vscode/
+.idea/
+
