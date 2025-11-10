@@ -101,7 +101,6 @@ configure_ini() {
 
     # Escape special characters (&, /, \) in the variables for sed replacement
     local safe_hashed_password=$(printf '%s\n' "$hashed_password" | sed -e 's/[&\\/]/\\&/g')
-    local safe_secret_key=$(printf '%s\n' "$secret_key" | sed -e 's/[&\\/]/\\&/g')
 
     # Generate a secure secret key
     info "Generating secure secret key..."
@@ -111,7 +110,7 @@ configure_ini() {
     info "Writing credentials and secret key to ${CONFIG_FILE}..."
     sed -i -E "s/^(username\s*=\s*).*/\1${web_user}/i" "$CONFIG_FILE"
     sed -i -E "s/^(password\s*=\s*).*/\1${safe_hashed_password}/i" "$CONFIG_FILE"
-    sed -i -E "s/^(secret_key\s*=\s*).*/\1${safe_secret_key}/i" "$CONFIG_FILE"
+    sed -i -E "s/^(secret_key\s*=\s*).*/\1${secret_key}/i" "$CONFIG_FILE"
 
     info "Configuration file updated."
 
