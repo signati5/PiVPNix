@@ -3,6 +3,7 @@
 import subprocess
 import json
 import os
+import shutil
 import time
 import threading
 from datetime import datetime
@@ -148,9 +149,28 @@ def run_monitoring_cycle(skip_updates=False):
             updated_data["last_update"] = existing_data.get('last_update')
             updated_data["update_timestamps"] = timestamp_history
         
-        with open(log_file_path, 'w', encoding='utf-8') as f:
-            json.dump(updated_data, f, indent=4)
-        print(f"[MONITOR] Log file '{log_file_path}' has been updated.")
+        # Define the path for the temporary file
+        temp_file_path = log_file_path + ".tmp"
+
+        try:
+            # 1. Write the new data to the temporary file
+            with open(temp_file_path, 'w', encoding='utf-8') as f:
+                json.dump(updated_data, f, indent=4)
+            
+            # 2. If writing succeeds, atomically rename the temporary file
+            #    to replace the original one. On POSIX systems, os.rename is atomic.
+            #    We use shutil.move for better portability (e.g., Windows).
+            shutil.move(temp_file_path, log_file_path)
+            
+            print(f"[MONITOR] Log file '{log_file_path}' has been updated atomically.")
+
+        except Exception as e:
+            # If something goes wrong, make sure to remove the temporary file
+            print(f"[MONITOR] Error during atomic write: {e}. The original log file was not modified.")
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+            # Re-raise the exception so it can be handled by an outer try/except block
+            raise
     
     except subprocess.CalledProcessError as e:
         print(f"[MONITOR] Error running pivpn command (exit code {e.returncode}): {e.stderr.strip()}")

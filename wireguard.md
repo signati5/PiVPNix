@@ -138,18 +138,69 @@ sudo sysctl -p
 ```
 
 ### ➤ Configure the Firewall (iptables)
-Now we need to create a firewall rule that allows VPN clients to "masquerade" behind the Raspberry Pi's IP when communicating with the local network.
+
+Now we need to configure the firewall so that devices connected through the VPN can communicate properly with your local network and the internet.
+Essentially, we’ll make the Raspberry Pi act as a small router by allowing **packet forwarding** and enabling **NAT (Network Address Translation)** — so that all VPN traffic appears to come from the Pi’s own IP address.
+
+Run the following commands one by one:
+
+#### 1️1. Enable NAT (Masquerading)
+
 ```bash
 sudo iptables -t nat -A POSTROUTING -s 10.6.0.0/24 -o eth0 -j MASQUERADE
 ```
-**Note**:
-*   Replace `10.6.0.0/24` with your VPN's subnet if you changed it during installation.
-*   Replace `eth0` with the name of your main network interface (the one connected to your router). You can find it with the `ip a` command.
 
-To make this rule permanent (so it survives a reboot), run:
+**What it does:**
+This rule applies **Network Address Translation (NAT)** to all packets coming from the VPN subnet (`10.6.0.0/24`) and going out through the Pi’s main network interface (`eth0`).
+It “masquerades” the source IP addresses meaning that when a VPN client (e.g., `10.6.0.2`) sends traffic to the internet or your LAN, the router only sees the Raspberry Pi’s IP address, not the client’s.
+
+**In other words:**
+The Raspberry Pi becomes a “middleman” that hides all VPN clients behind its own IP — just like how your home router lets many devices share one public IP.
+
+#### 2️2. Allow Forwarding from VPN to LAN/Internet
+
+```bash
+sudo iptables -A FORWARD -i wg0 -o eth0 -j ACCEPT
+```
+
+**What it does:**
+This rule allows traffic that **enters from the VPN interface (`wg0`)** to be **forwarded to your local network or the internet** through the main interface (`eth0`).
+
+**In other words:**
+When a device connected to the VPN tries to access a website or a device on your home network, this rule lets the traffic pass through the Raspberry Pi instead of being blocked.
+
+#### 3️3. Allow Forwarding from LAN/Internet back to VPN
+
+```bash
+sudo iptables -A FORWARD -i eth0 -o wg0 -j ACCEPT
+```
+
+**What it does:**
+This rule allows traffic in the **opposite direction** — from your local network (or internet) back to the VPN clients.
+
+**In other words:**
+It ensures that devices on your home network can respond to requests from VPN clients, and that replies to VPN traffic can flow back correctly.
+
+### ⚙️ Notes
+
+* Replace `10.6.0.0/24` with your VPN’s subnet if you changed it during installation.
+* Replace `eth0` with the name of your main network interface (for example, `wlan0` if your Raspberry Pi connects via Wi-Fi).
+  You can find it with:
+
+  ```bash
+  ip add
+  ```
+
+### 💾 Make the Rules Persistent
+
+By default, these rules will disappear after a reboot.
+To make them permanent, install and save them with:
+
 ```bash
 sudo netfilter-persistent save
 ```
+
+From now on, your Raspberry Pi will automatically load these firewall settings at startup, ensuring that VPN traffic is properly routed and masqueraded every time.
 
 ## 14. 📡 Verify the Connection with `ping`
 Now that everything is configured, let's test that the communication works correctly.

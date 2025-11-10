@@ -132,7 +132,7 @@ if __name__ == "__main__":
     app = create_app()
 
     # Start the background monitoring thread
-    start_monitor(app)
+    # start_monitor(app)
 
     print(f"[WEB] Flask server started. Access it at http://{args.host}:{args.port}")
     if args.debug:

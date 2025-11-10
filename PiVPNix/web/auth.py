@@ -1,5 +1,6 @@
 # web/auth.py
 
+import bcrypt
 from functools import wraps
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, current_app, jsonify
 
@@ -43,10 +44,17 @@ def login():
         
         # Get the stored credentials from the application configuration
         stored_username = current_app.config['USERNAME']
-        stored_password = current_app.config['PASSWORD']
-        
-        # Check if the provided credentials are valid
-        if username == stored_username and password == stored_password:
+        # This is now the HASHED password from the config.ini file
+        stored_hashed_password = current_app.config['PASSWORD']
+
+        # Check if the provided credentials are valid using bcrypt.checkpw
+        # bcrypt.checkpw compares the plain text password with the hashed one
+
+        # Encode both strings into bytes for bcrypt
+        password_bytes = password.encode('utf-8')
+        stored_hash_bytes = stored_hashed_password.encode('utf-8')
+
+        if username == stored_username and bcrypt.checkpw(password_bytes, stored_hash_bytes):
             session['logged_in'] = True
             session.permanent = True # Makes the session persistent across browser restarts
             return redirect(url_for('dashboard.dashboard'))

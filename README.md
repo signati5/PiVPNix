@@ -55,9 +55,13 @@ PiVPNix includes an automatic installation script to make setup as easy as possi
     ```
 
 4.  **Run the Installer Script**:
-    Make the script executable and then run it with `sudo`.
+    Make the script executable.
     ```bash
     chmod +x install.sh
+    ```
+    
+    Then run it with `sudo`.
+    ```bash
     sudo ./install.sh
     ```
 

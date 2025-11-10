@@ -26,6 +26,7 @@ VENV_DIR="${DIR_REPO}/venv"
 SERVICE_NAME="pivpnix"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 APP_PORT=""  # Will be defined by user input
+APP_HOST=""  # Will be defined by user input
 
 # --- Logging and Messaging Functions ---
 info() { echo -e "${GREEN}[INFO]${NC} $1"; }
@@ -88,6 +89,20 @@ configure_ini() {
         warn "Passwords do not match. Please try again."
     done
 
+    # Hash the password using bcrypt via the Python virtual environment
+    info "Hashing password securely with bcrypt..."
+    # We use 'echo -n' and pipe it to avoid the password appearing in the command history
+    local hashed_password
+    hashed_password=$(echo -n "$web_pass" | "$VENV_DIR/bin/python" -c "import sys, bcrypt; print(bcrypt.hashpw(sys.stdin.read().encode('utf-8'), bcrypt.gensalt()).decode('utf-8'))")
+
+    if [ -z "$hashed_password" ]; then
+        error "Failed to hash the password. Please make sure 'bcrypt' is listed in requirements.txt."
+    fi
+
+    # Escape special characters (&, /, \) in the variables for sed replacement
+    local safe_hashed_password=$(printf '%s\n' "$hashed_password" | sed -e 's/[&\\/]/\\&/g')
+    local safe_secret_key=$(printf '%s\n' "$secret_key" | sed -e 's/[&\\/]/\\&/g')
+
     # Generate a secure secret key
     info "Generating secure secret key..."
     local secret_key=$(openssl rand -hex 32)
@@ -95,8 +110,8 @@ configure_ini() {
     # Update config.ini with new credentials and key
     info "Writing credentials and secret key to ${CONFIG_FILE}..."
     sed -i -E "s/^(username\s*=\s*).*/\1${web_user}/i" "$CONFIG_FILE"
-    sed -i -E "s/^(password\s*=\s*).*/\1${web_pass}/i" "$CONFIG_FILE"
-    sed -i -E "s/^(secret_key\s*=\s*).*/\1${secret_key}/i" "$CONFIG_FILE"
+    sed -i -E "s/^(password\s*=\s*).*/\1${safe_hashed_password}/i" "$CONFIG_FILE"
+    sed -i -E "s/^(secret_key\s*=\s*).*/\1${safe_secret_key}/i" "$CONFIG_FILE"
 
     info "Configuration file updated."
 
@@ -104,7 +119,34 @@ configure_ini() {
     grep -E "^username|^secret_key" "$CONFIG_FILE" --color=never || true
 }
 
-# 4. Prompt user for the desired web service port and validate it
+# 4. Prompt user for the desired web service host
+ask_for_host() {
+    info "Configuring listening address for the web interface..."
+    echo "Do you want the interface to be accessible from:"
+    echo "  1) All devices on the network (0.0.0.0) [recommended]"
+    echo "  2) Only this device (localhost / 127.0.0.1) [advanced]"
+
+    while true; do
+        read -p "Choose an option [default: 1]: " -e -i 1 choice
+        case "$choice" in
+            1)
+                APP_HOST="0.0.0.0"
+                info "The interface will be accessible from the entire network."
+                break
+                ;;
+            2)
+                APP_HOST="127.0.0.1"
+                info "The interface will be accessible only from localhost."
+                break
+                ;;
+            *)
+                warn "Invalid choice. Please enter 1 or 2."
+                ;;
+        esac
+    done
+}
+
+# 5. Prompt user for the desired web service port and validate it
 ask_for_port() {
     info "Configuring listening port for the web interface..."
     while true; do
@@ -123,7 +165,7 @@ ask_for_port() {
     done
 }
 
-# 5. Create a systemd service to automatically run PiVPNix at startup
+# 6. Create a systemd service to automatically run PiVPNix at startup
 setup_service() {
     info "Creating systemd service '${SERVICE_NAME}.service'..."
 
@@ -150,7 +192,7 @@ BindsTo=wg-quick@wg0.service
 
 [Service]
 WorkingDirectory=${PIVPNIX_DIR}
-ExecStart=${PYTHON_EXEC} ${APP_FILE} --host 0.0.0.0 --port ${APP_PORT}
+ExecStart=${PYTHON_EXEC} ${APP_FILE} --host ${APP_HOST} --port ${APP_PORT}
 User=root
 Group=root
 Restart=always
@@ -192,6 +234,7 @@ main() {
     check_sudo
     install_dependencies
     configure_ini
+    ask_for_host
     ask_for_port
     setup_service
 
